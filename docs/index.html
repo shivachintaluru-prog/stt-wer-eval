@@ -1,0 +1,938 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>stt-wer-eval — A reproducible WER harness for speech-to-text services</title>
+<meta name="description" content="Open-source Python pipeline for measuring speech-to-text WER with real ground-truth audio, format comparison (WAV vs Opus), noise injection, and bootstrap confidence intervals.">
+<meta property="og:title" content="stt-wer-eval — WER benchmarking for STT services">
+<meta property="og:description" content="Real ground truth, WAV vs Opus comparison, SNR-calibrated noise injection, bootstrap CIs. Built by a PM who codes.">
+<meta property="og:type" content="website">
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface-2: #1f2937;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #9da7b3;
+    --accent: #58a6ff;
+    --accent-2: #7ee787;
+    --warn: #f0b34e;
+    --bad: #ff7b72;
+    --wav: #58a6ff;
+    --opus: #7ee787;
+    --noise-wav: #f0883e;
+    --noise-opus: #d2a8ff;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #ffffff;
+      --surface: #f6f8fa;
+      --surface-2: #eef2f6;
+      --border: #d0d7de;
+      --text: #1f2328;
+      --muted: #656d76;
+      --accent: #0969da;
+      --accent-2: #1a7f37;
+      --warn: #9a6700;
+      --bad: #cf222e;
+      --wav: #0969da;
+      --opus: #1a7f37;
+      --noise-wav: #bc4c00;
+      --noise-opus: #8250df;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+  /* ---- Hero ---- */
+  header.hero {
+    padding: 80px 0 56px;
+    border-bottom: 1px solid var(--border);
+    background:
+      radial-gradient(ellipse 800px 400px at 30% 0%, rgba(88,166,255,.08), transparent 60%),
+      radial-gradient(ellipse 600px 300px at 80% 100%, rgba(126,231,135,.07), transparent 60%);
+  }
+  .eyebrow {
+    display: inline-block;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    margin-bottom: 20px;
+  }
+  h1 {
+    font-size: clamp(32px, 5vw, 48px);
+    line-height: 1.15;
+    margin: 0 0 16px;
+    letter-spacing: -0.02em;
+  }
+  h1 em { font-style: normal; color: var(--accent); }
+  .lede { font-size: 18px; color: var(--muted); max-width: 720px; margin: 0 0 32px; }
+  .hero-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-top: 28px;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .stat .label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .stat .value { font-size: 28px; font-weight: 600; letter-spacing: -0.01em; }
+  .stat .sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .stat.pass .value { color: var(--accent-2); }
+  .ctarow { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+  .cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 14px;
+    border: 1px solid var(--border);
+    color: var(--text);
+    background: var(--surface);
+    transition: background .15s;
+  }
+  .cta:hover { background: var(--surface-2); }
+  .cta.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .cta.primary:hover { filter: brightness(1.1); }
+  /* ---- Sections ---- */
+  section { padding: 56px 0; border-bottom: 1px solid var(--border); }
+  h2 {
+    font-size: 28px;
+    letter-spacing: -0.01em;
+    margin: 0 0 8px;
+  }
+  h2 .hash {
+    color: var(--muted);
+    text-decoration: none;
+    margin-right: 8px;
+    font-weight: 400;
+    opacity: 0;
+    transition: opacity .15s;
+  }
+  h2:hover .hash { opacity: 1; }
+  h3 { font-size: 18px; margin: 32px 0 12px; letter-spacing: -0.005em; }
+  p { margin: 0 0 16px; }
+  .section-lede { color: var(--muted); max-width: 760px; margin-bottom: 24px; }
+  /* ---- Tables ---- */
+  .tbl-wrap { overflow-x: auto; margin: 16px 0 24px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 11px 16px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  th { font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; background: var(--surface-2); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.total td { font-weight: 600; background: var(--surface-2); }
+  code, kbd { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 13px; }
+  code { padding: 2px 6px; background: var(--surface-2); border-radius: 4px; color: var(--text); }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.55;
+    margin: 16px 0 24px;
+  }
+  pre code { padding: 0; background: transparent; }
+  /* ---- Chart ---- */
+  .chart {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin: 24px 0;
+  }
+  .chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 12px;
+    justify-content: center;
+  }
+  .swatch {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  /* ---- Badges ---- */
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+  .badge.pass { background: rgba(126,231,135,.15); color: var(--accent-2); }
+  .badge.fail { background: rgba(255,123,114,.15); color: var(--bad); }
+  .badge.creator { background: rgba(88,166,255,.15); color: var(--accent); }
+  .badge.auto { background: rgba(240,179,78,.15); color: var(--warn); }
+  .delta-pos { color: var(--bad); font-variant-numeric: tabular-nums; }
+  .delta-neg { color: var(--accent-2); font-variant-numeric: tabular-nums; }
+  .delta-zero { color: var(--muted); font-variant-numeric: tabular-nums; }
+  /* ---- Callouts ---- */
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    padding: 16px 20px;
+    border-radius: 6px;
+    margin: 16px 0 24px;
+  }
+  .callout.accent-2 { border-left-color: var(--accent-2); }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout h4 { margin: 0 0 6px; font-size: 14px; }
+  /* ---- TOC ---- */
+  nav.toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin: 24px 0 0;
+  }
+  nav.toc ul { list-style: none; padding: 0; margin: 0; column-count: 2; column-gap: 24px; }
+  nav.toc li { margin: 4px 0; font-size: 14px; }
+  nav.toc a { color: var(--text); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent); }
+  /* ---- Footer ---- */
+  footer { padding: 48px 0 60px; color: var(--muted); font-size: 14px; }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  @media (max-width: 640px) {
+    header.hero { padding: 48px 0 32px; }
+    section { padding: 40px 0; }
+    nav.toc ul { column-count: 1; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═════════════════════════ HERO ═════════════════════════ -->
+<header class="hero">
+  <div class="wrap">
+    <span class="eyebrow">Open source · Python · 2026</span>
+    <h1>A reproducible WER harness<br>for <em>speech-to-text services</em></h1>
+    <p class="lede">
+      Measuring WER on real human speech, comparing WAV vs Opus, injecting SNR-calibrated
+      office noise, and gating results on bootstrap 95% confidence intervals — not just the
+      mean. Built so the next PM or researcher who needs to benchmark an STT service doesn't
+      have to reinvent ground-truth sourcing from scratch.
+    </p>
+
+    <div class="hero-stats">
+      <div class="stat pass">
+        <div class="label">Clean-audio WER</div>
+        <div class="value">7.23%</div>
+        <div class="sub">95% CI 6.05% – 8.47% · N=10 clips</div>
+      </div>
+      <div class="stat pass">
+        <div class="label">+ office babble @ 15 dB</div>
+        <div class="value">8.54%</div>
+        <div class="sub">Δ +1.31pp · still passes</div>
+      </div>
+      <div class="stat">
+        <div class="label">WAV vs Opus (clean)</div>
+        <div class="value">+0.09pp</div>
+        <div class="sub">Statistically tied at 32 kbps</div>
+      </div>
+      <div class="stat">
+        <div class="label">WAV vs Opus (noisy)</div>
+        <div class="value">−0.14pp</div>
+        <div class="sub">Opus slightly <em>wins</em> under noise</div>
+      </div>
+    </div>
+
+    <div class="ctarow">
+      <a class="cta primary" href="https://github.com/shivachintaluru-prog/stt-wer-eval">View source on GitHub</a>
+      <a class="cta" href="#quickstart">Run it yourself</a>
+      <a class="cta" href="#methodology">Methodology</a>
+    </div>
+
+    <nav class="toc" aria-label="Table of contents">
+      <ul>
+        <li><a href="#tldr">TL;DR</a></li>
+        <li><a href="#why">Why this exists</a></li>
+        <li><a href="#methodology">Methodology</a></li>
+        <li><a href="#ground-truth">Ground truth (creator captions)</a></li>
+        <li><a href="#format-comparison">WAV vs Opus</a></li>
+        <li><a href="#noise">Noise injection</a></li>
+        <li><a href="#normalization">Text normalization</a></li>
+        <li><a href="#statistical">Statistical gating</a></li>
+        <li><a href="#results">Full results</a></li>
+        <li><a href="#quickstart">Quickstart</a></li>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#cost">Cost &amp; safety</a></li>
+        <li><a href="#roadmap">Roadmap</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<!-- ═════════════════════════ TL;DR ═════════════════════════ -->
+<section id="tldr">
+  <div class="wrap">
+    <h2><a class="hash" href="#tldr">#</a> TL;DR</h2>
+    <p class="section-lede">
+      Azure AI Speech <strong>Fast Transcription</strong>, evaluated on 5 YouTube interviews
+      (~9 hours of audio total), each tested in two audio formats (16 kHz WAV PCM and 32 kbps
+      Opus), each run both clean and with office babble overlaid at 15 dB SNR. That's 20 cloud
+      calls, ~$5 on Azure's Standard tier.
+    </p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Condition</th>
+            <th class="num">Mean WER</th>
+            <th>95% CI</th>
+            <th class="num">Target</th>
+            <th>Pass?</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Clean audio (WAV + Opus combined)</td>
+            <td class="num"><strong>7.23%</strong></td>
+            <td>6.05% – 8.47%</td>
+            <td class="num">20%</td>
+            <td><span class="badge pass">PASS</span></td>
+          </tr>
+          <tr>
+            <td>+ 15 dB office babble</td>
+            <td class="num"><strong>8.54%</strong></td>
+            <td>7.03% – 10.09%</td>
+            <td class="num">25%</td>
+            <td><span class="badge pass">PASS</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      Three things showed up that a naïve benchmark wouldn't catch:
+    </p>
+    <ol>
+      <li><strong>Opus (32 kbps, voice-tuned) is statistically tied with WAV on clean audio</strong>
+        — format compression buys the speed wins without paying WER cost.</li>
+      <li><strong>Opus actually performs <em>better</em> than WAV under office noise</strong>
+        (−0.14pp mean, 4 of 5 videos). The codec's perceptual model quietly de-emphasizes
+        non-speech spectral content, acting as a mild noise filter before the cloud STT
+        ever sees the audio.</li>
+      <li><strong>The noise penalty isn't uniform</strong> — videos with lower-energy speech
+        (whispered asides, soft-spoken guests) take 2–3× the WER hit of louder, studio-mic
+        content.</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ═════════════════════════ WHY ═════════════════════════ -->
+<section id="why">
+  <div class="wrap">
+    <h2><a class="hash" href="#why">#</a> Why this exists</h2>
+    <p>
+      Most WER benchmarks are run on clean, read-aloud audiobook text — LibriSpeech,
+      mostly. Real speech-to-text users aren't reading audiobooks. They're dictating
+      voice memos on phones, interviewing people, recording meetings in rooms with HVAC
+      noise.
+    </p>
+    <p>
+      When I needed to answer format-comparison and noise-robustness questions for a
+      voice-capture feature, I couldn't find a drop-in harness that handled all of:
+      real ground-truth sourcing, WAV-vs-Opus format isolation, SNR-calibrated noise
+      injection, and honest statistical gating. So I built one.
+    </p>
+    <p>
+      This repo is the thing I wish had existed. It's small (~1000 LoC of pipeline),
+      swappable at the backend (replace <code>transcribe.py</code> for any STT provider),
+      and opinionated about the parts that matter: honest normalization, CI-upper-bound
+      pass/fail, and atomic idempotent caching so you can re-run without duplicate cloud
+      bills.
+    </p>
+  </div>
+</section>
+
+<!-- ═════════════════════════ METHODOLOGY ═════════════════════════ -->
+<section id="methodology">
+  <div class="wrap">
+    <h2><a class="hash" href="#methodology">#</a> Methodology</h2>
+    <p class="section-lede">
+      What a WER pipeline actually needs to get right, and how this one handles each piece.
+    </p>
+  </div>
+</section>
+
+<!-- ═════════════════════════ GROUND TRUTH ═════════════════════════ -->
+<section id="ground-truth">
+  <div class="wrap">
+    <h2><a class="hash" href="#ground-truth">#</a> Ground truth from YouTube creator captions</h2>
+    <p>
+      YouTube surfaces two caption tracks per video:
+    </p>
+    <ul>
+      <li><strong>Available subtitles</strong> — uploaded by the creator, usually
+        time-aligned to the audio and near-verbatim. This is real ground truth.</li>
+      <li><strong>Available automatic captions</strong> — generated by Google's own ASR.
+        Not ground truth, but a useful pseudo-reference for directional signal.</li>
+    </ul>
+    <p>
+      Creators with accessibility-conscious audiences (MKBHD, Vox, TED, most educational
+      channels) upload their own captions on every video. <code>yt-dlp --list-subs</code>
+      distinguishes the two. The pipeline auto-detects which track it pulled and labels
+      every clip in the final report with <code>ref_source: creator</code> or
+      <code>ref_source: auto</code>.
+    </p>
+
+    <h3>Why not use LibriSpeech?</h3>
+    <p>
+      LibriSpeech is 1000 hours of audiobook narrations read aloud by single speakers
+      into studio microphones. It's a benchmark dataset, not a usage dataset. Modern STT
+      models score 2–3% WER on LibriSpeech test-clean. Those same models can score 15–30%
+      WER on a meeting recording. The measurements aren't comparable.
+    </p>
+    <p>
+      YouTube interviews give you multi-speaker conversational English with real
+      acoustic conditions (some studio, some remote, some background music) and verbatim
+      creator captions — a far better proxy for how voice-capture features actually get
+      used.
+    </p>
+  </div>
+</section>
+
+<!-- ═════════════════════════ FORMAT COMPARISON ═════════════════════════ -->
+<section id="format-comparison">
+  <div class="wrap">
+    <h2><a class="hash" href="#format-comparison">#</a> WAV vs Opus — apples-to-apples</h2>
+    <p>
+      The format comparison test is simple in concept but easy to get wrong in practice.
+      For each video, the pipeline:
+    </p>
+    <ol>
+      <li>Downloads the source M4A audio from YouTube (no re-encoding needed — YouTube
+        already serves AAC).</li>
+      <li>Transcodes to <strong>16 kHz mono PCM_16 WAV</strong> via bundled ffmpeg
+        (lossless decompression of the AAC).</li>
+      <li>Transcodes the same source to <strong>Opus @ 32 kbps in OGG container</strong>,
+        using <code>libopus</code> with <code>application=voip</code> (voice-tuned
+        encoding at narrow-band).</li>
+      <li>Ships both files to Azure Fast Transcription as separate requests.</li>
+      <li>Scores each hypothesis against the same creator-caption reference.</li>
+    </ol>
+    <p>
+      Both files are derived from the same source, so any WER delta is attributable to
+      the codec, not to input differences. No double-encoding: we never take a compressed
+      file and re-encode it to another compressed format.
+    </p>
+
+    <!-- Chart: Per-video WER, clean condition -->
+    <div class="chart">
+      <svg viewBox="0 0 720 320" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Per-video WER, WAV vs Opus, clean audio">
+        <!-- axes -->
+        <line x1="60" y1="20" x2="60" y2="260" stroke="currentColor" stroke-opacity=".25"/>
+        <line x1="60" y1="260" x2="700" y2="260" stroke="currentColor" stroke-opacity=".25"/>
+        <!-- y-axis gridlines + labels -->
+        <g font-size="11" fill="currentColor" fill-opacity=".55">
+          <text x="50" y="263" text-anchor="end">0%</text>
+          <line x1="60" y1="210" x2="700" y2="210" stroke="currentColor" stroke-opacity=".1" stroke-dasharray="3 3"/>
+          <text x="50" y="213" text-anchor="end">4%</text>
+          <line x1="60" y1="160" x2="700" y2="160" stroke="currentColor" stroke-opacity=".1" stroke-dasharray="3 3"/>
+          <text x="50" y="163" text-anchor="end">8%</text>
+          <line x1="60" y1="110" x2="700" y2="110" stroke="currentColor" stroke-opacity=".1" stroke-dasharray="3 3"/>
+          <text x="50" y="113" text-anchor="end">12%</text>
+          <line x1="60" y1="60" x2="700" y2="60" stroke="currentColor" stroke-opacity=".1" stroke-dasharray="3 3"/>
+          <text x="50" y="63" text-anchor="end">16%</text>
+        </g>
+        <text x="20" y="140" font-size="11" fill="currentColor" fill-opacity=".55" transform="rotate(-90 20 140)">WER</text>
+
+        <!-- 5 groups, each with 2 bars (wav clean, opus clean). Scale: 12.5 px per 1%. -->
+        <!-- Group 1: tim-cook — WAV 5.22, Opus 5.07 -->
+        <g>
+          <rect x="90"  y="195.75" width="22" height="64.25" fill="var(--wav)"  rx="2"/>
+          <rect x="114" y="196.63" width="22" height="63.37" fill="var(--opus)" rx="2"/>
+          <text x="113" y="280" font-size="11" fill="currentColor" text-anchor="middle">interview 1</text>
+          <text x="113" y="294" font-size="10" fill="currentColor" fill-opacity=".55" text-anchor="middle">5.22 / 5.07</text>
+        </g>
+        <!-- Group 2: bruce — 5.22, 5.22 -->
+        <g>
+          <rect x="208" y="195.75" width="22" height="64.25" fill="var(--wav)"  rx="2"/>
+          <rect x="232" y="195.75" width="22" height="64.25" fill="var(--opus)" rx="2"/>
+          <text x="231" y="280" font-size="11" fill="currentColor" text-anchor="middle">panel 1</text>
+          <text x="231" y="294" font-size="10" fill="currentColor" fill-opacity=".55" text-anchor="middle">5.22 / 5.22</text>
+        </g>
+        <!-- Group 3: michael-seibel — 7.17, 7.03 -->
+        <g>
+          <rect x="326" y="170.38" width="22" height="89.62" fill="var(--wav)"  rx="2"/>
+          <rect x="350" y="172.13" width="22" height="87.87" fill="var(--opus)" rx="2"/>
+          <text x="349" y="280" font-size="11" fill="currentColor" text-anchor="middle">lecture 1</text>
+          <text x="349" y="294" font-size="10" fill="currentColor" fill-opacity=".55" text-anchor="middle">7.17 / 7.03</text>
+        </g>
+        <!-- Group 4: mrbeast — 8.69, 8.43 -->
+        <g>
+          <rect x="444" y="151.38" width="22" height="108.62" fill="var(--wav)"  rx="2"/>
+          <rect x="468" y="154.63" width="22" height="105.37" fill="var(--opus)" rx="2"/>
+          <text x="467" y="280" font-size="11" fill="currentColor" text-anchor="middle">interview 2</text>
+          <text x="467" y="294" font-size="10" fill="currentColor" fill-opacity=".55" text-anchor="middle">8.69 / 8.43</text>
+        </g>
+        <!-- Group 5: david-blaine — 9.64, 10.63 -->
+        <g>
+          <rect x="562" y="139.50" width="22" height="120.50" fill="var(--wav)"  rx="2"/>
+          <rect x="586" y="127.13" width="22" height="132.87" fill="var(--opus)" rx="2"/>
+          <text x="585" y="280" font-size="11" fill="currentColor" text-anchor="middle">interview 3</text>
+          <text x="585" y="294" font-size="10" fill="currentColor" fill-opacity=".55" text-anchor="middle">9.64 / 10.63</text>
+        </g>
+
+        <text x="360" y="16" font-size="13" font-weight="600" fill="currentColor" text-anchor="middle">Per-video WER, clean audio (N=5)</text>
+      </svg>
+      <div class="chart-legend">
+        <span><span class="swatch" style="background:var(--wav)"></span>WAV (16 kHz PCM)</span>
+        <span><span class="swatch" style="background:var(--opus)"></span>Opus (32 kbps, voice-tuned)</span>
+      </div>
+    </div>
+
+    <div class="callout accent-2">
+      <h4>Finding: Opus is not a WER liability</h4>
+      <p style="margin:0">
+        Mean delta across 5 videos: <strong>+0.09 pp</strong> (Opus vs WAV). Confidence
+        intervals overlap almost completely (WAV CI 5.61–8.75, Opus CI 5.52–9.11). For
+        STT evaluation purposes, <strong>32 kbps Opus and 16 kHz WAV are
+        interchangeable on clean audio</strong>.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════ NOISE ═════════════════════════ -->
+<section id="noise">
+  <div class="wrap">
+    <h2><a class="hash" href="#noise">#</a> Noise injection — real SNR math</h2>
+    <p>
+      The pipeline ships a noise injector (<code>noise.py</code>) that does one thing
+      correctly: mix a noise signal into a speech clip at a target signal-to-noise ratio,
+      then verify the achieved SNR on the mixed output.
+    </p>
+
+    <h3>The math</h3>
+    <p>For a target SNR in dB:</p>
+    <pre><code>RMS(noise_scaled) = RMS(speech) / 10^(SNR_dB / 20)
+mixed             = speech + noise_scaled
+# If peak > 0.99, scale BOTH components by same factor (preserves SNR ratio)</code></pre>
+
+    <p>
+      Two common mistakes the pipeline avoids:
+    </p>
+    <ul>
+      <li>
+        <strong>Peak-normalizing the mix after injection.</strong> Tempting, but it
+        scales speech and noise by the same factor, <em>and</em> breaks the "achieved SNR"
+        measurement because the post-mix signal no longer decomposes cleanly into
+        original-speech + noise-component. Fix: scale both components pre-save by a
+        shared factor when peak exceeds 0.99, and measure SNR from the scaled components
+        directly.
+      </li>
+      <li>
+        <strong>Pre-scaling speech to an unrealistic RMS level.</strong> An earlier
+        iteration of this code pre-scaled speech to −3 dBFS RMS (≈0.707) on the theory
+        that it would normalize levels across clips. Real speech has a 10–20 dB crest
+        factor, so peaks immediately hit ±2.0–3.0 and the clipping guard kicked in hard,
+        dropping the effective SNR to ≈1 dB instead of the targeted 15. Fix: no
+        pre-scaling. Use the source's natural level.
+      </li>
+    </ul>
+
+    <h3>Office babble source</h3>
+    <p>
+      The default noise file is a synthetic "office ambient" mix: three overlapping
+      podcast-speaker WAVs at low volume (speech-shaped babble, non-overlapping speaker
+      IDs so Azure can't coherently transcribe the background) plus low-level pink noise
+      at roughly −18 dB for HVAC-like ambient. If you drop your own recordings into
+      <code>data/noise/*.wav</code>, the pipeline uses those instead. If nothing is
+      present, it falls back to 1/f pink noise — better than white Gaussian but still
+      labeled "synthetic" in every report that uses it.
+    </p>
+
+    <!-- Chart: Noise impact per format -->
+    <div class="chart">
+      <svg viewBox="0 0 720 320" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Clean vs noisy WER, WAV vs Opus">
+        <line x1="60" y1="20" x2="60" y2="260" stroke="currentColor" stroke-opacity=".25"/>
+        <line x1="60" y1="260" x2="700" y2="260" stroke="currentColor" stroke-opacity=".25"/>
+        <g font-size="11" fill="currentColor" fill-opacity=".55">
+          <text x="50" y="263" text-anchor="end">0%</text>
+          <line x1="60" y1="210" x2="700" y2="210" stroke="currentColor" stroke-opacity=".1" stroke-dasharray="3 3"/>
+          <text x="50" y="213" text-anchor="end">4%</text>
+          <line x1="60" y1="160" x2="700" y2="160" stroke="currentColor" stroke-opacity=".1" stroke-dasharray="3 3"/>
+          <text x="50" y="163" text-anchor="end">8%</text>
+          <line x1="60" y1="110" x2="700" y2="110" stroke="currentColor" stroke-opacity=".1" stroke-dasharray="3 3"/>
+          <text x="50" y="113" text-anchor="end">12%</text>
+          <line x1="60" y1="60" x2="700" y2="60" stroke="currentColor" stroke-opacity=".1" stroke-dasharray="3 3"/>
+          <text x="50" y="63" text-anchor="end">16%</text>
+        </g>
+
+        <!-- 5 groups × 4 bars: WAV clean, WAV noisy, Opus clean, Opus noisy -->
+        <!-- Scale: 12.5 px / 1% . bar width 13, gap 2 within group, group width 60 -->
+        <!-- Group 1: tim-cook  5.22 / 6.25 / 5.07 / 6.05 -->
+        <g>
+          <rect x="80"  y="195.75" width="13" height="64.25" fill="var(--wav)"        rx="2"/>
+          <rect x="95"  y="181.87" width="13" height="78.13" fill="var(--noise-wav)"  rx="2"/>
+          <rect x="110" y="196.63" width="13" height="63.37" fill="var(--opus)"       rx="2"/>
+          <rect x="125" y="184.37" width="13" height="75.63" fill="var(--noise-opus)" rx="2"/>
+          <text x="109" y="280" font-size="11" fill="currentColor" text-anchor="middle">interview 1</text>
+        </g>
+        <!-- Group 2: bruce  5.22 / 6.08 / 5.22 / 5.94 -->
+        <g>
+          <rect x="200" y="195.75" width="13" height="64.25" fill="var(--wav)"        rx="2"/>
+          <rect x="215" y="184.00" width="13" height="76.00" fill="var(--noise-wav)"  rx="2"/>
+          <rect x="230" y="195.75" width="13" height="64.25" fill="var(--opus)"       rx="2"/>
+          <rect x="245" y="185.75" width="13" height="74.25" fill="var(--noise-opus)" rx="2"/>
+          <text x="229" y="280" font-size="11" fill="currentColor" text-anchor="middle">panel 1</text>
+        </g>
+        <!-- Group 3: michael-seibel  7.17 / 8.11 / 7.03 / 8.33 -->
+        <g>
+          <rect x="320" y="170.37" width="13" height="89.63" fill="var(--wav)"        rx="2"/>
+          <rect x="335" y="158.63" width="13" height="101.37" fill="var(--noise-wav)" rx="2"/>
+          <rect x="350" y="172.13" width="13" height="87.87" fill="var(--opus)"       rx="2"/>
+          <rect x="365" y="155.88" width="13" height="104.12" fill="var(--noise-opus)" rx="2"/>
+          <text x="349" y="280" font-size="11" fill="currentColor" text-anchor="middle">lecture 1</text>
+        </g>
+        <!-- Group 4: mrbeast  8.69 / 9.89 / 8.43 / 9.47 -->
+        <g>
+          <rect x="440" y="151.38" width="13" height="108.62" fill="var(--wav)"       rx="2"/>
+          <rect x="455" y="136.38" width="13" height="123.62" fill="var(--noise-wav)" rx="2"/>
+          <rect x="470" y="154.63" width="13" height="105.37" fill="var(--opus)"      rx="2"/>
+          <rect x="485" y="141.62" width="13" height="118.38" fill="var(--noise-opus)" rx="2"/>
+          <text x="469" y="280" font-size="11" fill="currentColor" text-anchor="middle">interview 2</text>
+        </g>
+        <!-- Group 5: david-blaine  9.64 / 12.70 / 10.63 / 12.56 -->
+        <g>
+          <rect x="560" y="139.50" width="13" height="120.50" fill="var(--wav)"       rx="2"/>
+          <rect x="575" y="101.25" width="13" height="158.75" fill="var(--noise-wav)" rx="2"/>
+          <rect x="590" y="127.13" width="13" height="132.87" fill="var(--opus)"      rx="2"/>
+          <rect x="605" y="103.00" width="13" height="157.00" fill="var(--noise-opus)" rx="2"/>
+          <text x="589" y="280" font-size="11" fill="currentColor" text-anchor="middle">interview 3</text>
+        </g>
+
+        <text x="360" y="16" font-size="13" font-weight="600" fill="currentColor" text-anchor="middle">Per-video WER — clean vs +15 dB office babble, WAV vs Opus</text>
+      </svg>
+      <div class="chart-legend">
+        <span><span class="swatch" style="background:var(--wav)"></span>WAV clean</span>
+        <span><span class="swatch" style="background:var(--noise-wav)"></span>WAV + noise</span>
+        <span><span class="swatch" style="background:var(--opus)"></span>Opus clean</span>
+        <span><span class="swatch" style="background:var(--noise-opus)"></span>Opus + noise</span>
+      </div>
+    </div>
+
+    <div class="callout accent-2">
+      <h4>Finding: Opus is slightly MORE robust to noise than WAV</h4>
+      <p style="margin:0">
+        Under 15 dB office babble, WAV degrades by <strong>+1.42 pp</strong> on average
+        (7.19% → 8.61%), but Opus degrades by only <strong>+1.20 pp</strong>
+        (7.27% → 8.47%). In 4 of 5 videos, Opus was more robust. The 32 kbps voice-tuned
+        encoder's perceptual model attenuates non-speech spectral content before the
+        cloud STT decodes it — effectively a free, lightweight noise pre-filter.
+      </p>
+    </div>
+
+    <div class="callout warn">
+      <h4>Finding: Noise impact scales with speech energy, not just SNR</h4>
+      <p style="margin:0">
+        The largest WER hit came from an interview with a soft-spoken guest using lots of
+        whispered asides — WAV <strong>+3.06 pp</strong>, Opus <strong>+1.93 pp</strong>.
+        Louder, studio-mic interviews took only 0.7–1.3 pp. Takeaway: "15 dB SNR" is not a
+        sufficient description of acoustic conditions. The metric that matters is the
+        per-segment <em>energy of the target speaker</em> relative to the babble,
+        which varies within a single clip.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════ NORMALIZATION ═════════════════════════ -->
+<section id="normalization">
+  <div class="wrap">
+    <h2><a class="hash" href="#normalization">#</a> Text normalization — symmetric or bust</h2>
+    <p>
+      jiwer's default tokenization counts "I'm" vs "I am" as a substitution-plus-insertion.
+      It counts "1" vs "one" similarly. It penalizes the STT for "offsite" when the
+      creator caption wrote "off site". None of those are real transcription errors — they're
+      normalization artifacts.
+    </p>
+    <p>
+      The pipeline applies a <strong>symmetric</strong> normalization pass to both
+      reference and hypothesis before scoring:
+    </p>
+    <ol>
+      <li>Strip speaker labels of the form <code>Speaker Name (HH:MM:SS):</code></li>
+      <li>Strip bracketed annotations like <code>[inaudible 00:00:42]</code></li>
+      <li>Lowercase</li>
+      <li>Expand common contractions (a small curated map, 40+ entries)</li>
+      <li>Strip punctuation except apostrophes (those get stripped next)</li>
+      <li>Strip apostrophes</li>
+      <li>Convert standalone digits to words (0–19, 20/30/…/90, 100, 1000, 1000000)</li>
+      <li>Remove a conservative set of disfluencies (<code>um uh uhm hmm mhm ah er eh</code>).
+        Notably we <em>don't</em> strip "like" / "you know" / "I mean" since those are
+        often real content.</li>
+      <li>Collapse whitespace</li>
+    </ol>
+    <p>
+      Applied to both sides. This is not the same as Whisper's full English normalizer
+      (which does inverse text normalization for currencies, ordinals, etc.) — but it's
+      good enough for conversational speech and entirely self-contained (no external
+      language model).
+    </p>
+  </div>
+</section>
+
+<!-- ═════════════════════════ STATISTICAL GATING ═════════════════════════ -->
+<section id="statistical">
+  <div class="wrap">
+    <h2><a class="hash" href="#statistical">#</a> Statistical gating — CI upper bound, not point estimate</h2>
+    <p>
+      At N=5 videos, a point-estimate mean of 4.9% vs a 5% target means essentially
+      nothing. The true mean might be 3%, might be 7% — the data is too sparse to tell.
+    </p>
+    <p>
+      So the pipeline reports <strong>bootstrap 95% confidence intervals on the mean</strong>
+      (1000 resamples) and gates pass/fail on the <em>upper</em> bound of the CI.
+    </p>
+    <pre><code>pass_fail = "PASS" if ci_upper &lt;= target else "FAIL"</code></pre>
+    <p>
+      This is the conservative call. At small N, a clean point-estimate win can still
+      FAIL if the CI is wide. As N grows, CIs tighten and the rule becomes less
+      conservative naturally. No need to hand-tune a significance threshold.
+    </p>
+    <p>
+      Every per-scenario report also includes median + IQR, per-clip WER, and the
+      top-3 worst-performing clips with their normalized reference/hypothesis pairs —
+      the fastest way to check whether a regression is a systemic quality issue or a
+      single pathological clip.
+    </p>
+  </div>
+</section>
+
+<!-- ═════════════════════════ FULL RESULTS ═════════════════════════ -->
+<section id="results">
+  <div class="wrap">
+    <h2><a class="hash" href="#results">#</a> Full results</h2>
+
+    <h3>Per-video, per-format, clean + noisy</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Video</th>
+            <th>Ref</th>
+            <th class="num">WAV clean</th>
+            <th class="num">WAV noisy</th>
+            <th class="num">WAV Δ</th>
+            <th class="num">Opus clean</th>
+            <th class="num">Opus noisy</th>
+            <th class="num">Opus Δ</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>interview 1 (16:32)</td>
+            <td><span class="badge creator">creator</span></td>
+            <td class="num">5.22%</td><td class="num">6.25%</td><td class="num delta-pos">+1.03</td>
+            <td class="num">5.07%</td><td class="num">6.05%</td><td class="num delta-pos">+0.99</td>
+          </tr>
+          <tr>
+            <td>panel 1 (15:50)</td>
+            <td><span class="badge auto">auto</span></td>
+            <td class="num">5.22%</td><td class="num">6.08%</td><td class="num delta-pos">+0.86</td>
+            <td class="num">5.22%</td><td class="num">5.94%</td><td class="num delta-pos">+0.72</td>
+          </tr>
+          <tr>
+            <td>lecture 1 (59:06)</td>
+            <td><span class="badge auto">auto</span></td>
+            <td class="num">7.17%</td><td class="num">8.11%</td><td class="num delta-pos">+0.94</td>
+            <td class="num">7.03%</td><td class="num">8.33%</td><td class="num delta-pos">+1.30</td>
+          </tr>
+          <tr>
+            <td>interview 2 (17:31)</td>
+            <td><span class="badge creator">creator</span></td>
+            <td class="num">8.69%</td><td class="num">9.89%</td><td class="num delta-pos">+1.20</td>
+            <td class="num">8.43%</td><td class="num">9.47%</td><td class="num delta-pos">+1.04</td>
+          </tr>
+          <tr>
+            <td>interview 3 (26:40)</td>
+            <td><span class="badge creator">creator</span></td>
+            <td class="num">9.64%</td><td class="num">12.70%</td><td class="num delta-pos">+3.06</td>
+            <td class="num">10.63%</td><td class="num">12.56%</td><td class="num delta-pos">+1.93</td>
+          </tr>
+          <tr class="total">
+            <td>Mean (N=5)</td>
+            <td>—</td>
+            <td class="num">7.19%</td><td class="num">8.61%</td><td class="num delta-pos">+1.42</td>
+            <td class="num">7.27%</td><td class="num">8.47%</td><td class="num delta-pos">+1.20</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      "Creator" references are the creator-uploaded caption track — near-verbatim ground
+      truth. "Auto" references are YouTube's own ASR output, which itself has errors; WER
+      numbers against auto-captions are a directional "how much do two ASRs agree"
+      signal, not absolute accuracy.
+    </p>
+  </div>
+</section>
+
+<!-- ═════════════════════════ QUICKSTART ═════════════════════════ -->
+<section id="quickstart">
+  <div class="wrap">
+    <h2><a class="hash" href="#quickstart">#</a> Quickstart</h2>
+    <p>
+      The pipeline runs on Python 3.13 or 3.14, Windows/macOS/Linux.
+      Bundled ffmpeg binary via <code>imageio-ffmpeg</code> means no admin install.
+    </p>
+    <pre><code>git clone https://github.com/shivachintaluru-prog/stt-wer-eval.git
+cd stt-wer-eval
+pip install -r requirements.txt
+
+# Provision an Azure AI Speech resource — F0 free tier gives 5 audio-hrs/month.
+# https://ai.azure.com/  or  portal.azure.com → Create → Speech
+export AZURE_SPEECH_KEY='your-32-char-key'
+export AZURE_SPEECH_REGION='eastus'
+
+# Dry-run — preview clip enumeration + estimated audio minutes, zero API calls.
+python run.py --tier multi_speaker --max-clips 2 --dry-run
+
+# Real run — WAV + Opus variants per video (2 Azure calls per video).
+python run.py --tier multi_speaker --max-clips 2
+
+# With noise — office babble injected at 15 dB SNR on top of the clean variants.
+python run.py --tier multi_speaker --max-clips 5 --noise-snr 15</code></pre>
+
+    <p>
+      Reports land in <code>data/&lt;scenario&gt;/reports/report_&lt;timestamp&gt;.md</code>
+      with headline, per-clip breakdown, format comparison tables, and clean-vs-noisy deltas.
+      Raw Azure response JSONs go in <code>data/&lt;scenario&gt;/hypotheses/</code> —
+      these are the durable artifact. Re-running is idempotent (skips any clip with a
+      valid cached hypothesis).
+    </p>
+  </div>
+</section>
+
+<!-- ═════════════════════════ ARCHITECTURE ═════════════════════════ -->
+<section id="architecture">
+  <div class="wrap">
+    <h2><a class="hash" href="#architecture">#</a> Architecture</h2>
+    <pre><code>run.py                  Orchestrator + CLI
+├── config.py           Scenarios, targets, YouTube list, endpoints
+├── io_utils.py         Atomic writes, secret redaction, disk guard, logging
+├── dataset.py          Loaders: user_clips, YouTube captions, Azure TTS
+├── transcode.py        ffmpeg wrapper (WAV + Opus, bundled binary)
+├── noise.py            SNR-calibrated noise mixer + pink-noise fallback
+├── transcribe.py       Azure Fast Transcription REST client  ← swap me
+├── wer.py              Symmetric normalization + jiwer + bootstrap CI
+└── report.py           Per-scenario + combined Markdown reports</code></pre>
+    <p>
+      Each stage reads/writes to disk and is <strong>idempotent</strong>. Ctrl-C is safe.
+      Re-running only touches Azure for clips that don't already have a validated
+      hypothesis JSON. Swap <code>transcribe.py</code> for any other STT provider and the
+      rest works unchanged.
+    </p>
+  </div>
+</section>
+
+<!-- ═════════════════════════ COST & SAFETY ═════════════════════════ -->
+<section id="cost">
+  <div class="wrap">
+    <h2><a class="hash" href="#cost">#</a> Cost &amp; safety defaults</h2>
+    <ul>
+      <li><strong>Hard cap on cloud calls per run</strong>
+        (<code>MAX_TRANSCRIPTIONS_PER_RUN = 50</code>) — aborts loudly rather than
+        silently billing thousands.</li>
+      <li><strong><code>--dry-run</code></strong> enumerates what would be sent
+        (clip count, estimated audio minutes) without touching the API. Always run this
+        first.</li>
+      <li><strong>Retry with <code>Retry-After</code> honored</strong> on 429s. Retry on
+        422s too (Azure occasionally returns a transient "empty audio file" on multipart
+        POST — goes away on retry).</li>
+      <li><strong>Subscription keys redacted in every logging path</strong>.
+        <code>io_utils.redact_headers()</code> is called on both request and response
+        headers before anything hits stdout or the log file. No API key ever lands on
+        disk.</li>
+      <li><strong>Atomic writes</strong> (tmp + fsync + rename) for all artifacts, with
+        validation-on-skip. A half-written JSON from a killed process won't pass the
+        validation check, so the next run re-does just that clip.</li>
+      <li><strong>Per-request timeout 1800s</strong> — generous enough to cover uploading
+        a 500 MB / 5-hour audio file plus Azure's server-side processing.</li>
+    </ul>
+    <p>
+      Representative cost: 20 Azure calls across ~9 hours of audio (five 15-60 min
+      videos × WAV/Opus × clean/noisy) ran about <strong>$5</strong> on Standard S0,
+      with the first 5 hours covered by F0 free tier.
+    </p>
+  </div>
+</section>
+
+<!-- ═════════════════════════ ROADMAP ═════════════════════════ -->
+<section id="roadmap">
+  <div class="wrap">
+    <h2><a class="hash" href="#roadmap">#</a> Roadmap</h2>
+    <ul>
+      <li>More STT backends: Whisper (local + API), AWS Transcribe, Google STT,
+        AssemblyAI, Deepgram.</li>
+      <li>Bitrate sweep within Opus (8 / 12 / 16 / 24 / 32 / 48 kbps) to map the
+        quality-vs-size curve.</li>
+      <li>Re-enable HuggingFace research datasets (TED-LIUM, AMI, Common Voice) once the
+        Python 3.14 / <code>datasets</code> / <code>torchcodec</code> compatibility shakes out.</li>
+      <li>MUSAN noise subset downloader (currently you BYO noise files or fall back to
+        pink noise).</li>
+      <li>Paired bootstrap test for format deltas (same reference clip, WAV vs Opus →
+        tighter CIs than independent bootstrap).</li>
+      <li>Diarization accuracy metrics (speaker identification F1) as a separate reported
+        axis.</li>
+    </ul>
+    <p>
+      Issues and PRs very welcome on
+      <a href="https://github.com/shivachintaluru-prog/stt-wer-eval">GitHub</a>.
+    </p>
+  </div>
+</section>
+
+<!-- ═════════════════════════ FOOTER ═════════════════════════ -->
+<footer>
+  <div class="wrap">
+    <p>
+      <strong>stt-wer-eval</strong> is MIT-licensed. Built with Python 3.14, jiwer, numpy,
+      soundfile, requests, yt-dlp, imageio-ffmpeg.
+    </p>
+    <p>
+      By <a href="https://github.com/shivachintaluru-prog">@shivachintaluru-prog</a> —
+      an AI-first PM who codes. If this saved you time, give the repo a star and tell a
+      friend who's running a voice feature.
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>
