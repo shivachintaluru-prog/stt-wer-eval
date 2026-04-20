@@ -1,7 +1,6 @@
 # stt-wer-eval
 
-**A reproducible Word Error Rate (WER) harness for speech-to-text services —
-built by a PM who codes, because no one else was going to build it for me.**
+**A reproducible Word Error Rate (WER) harness for speech-to-text services
 
 📖 **[Read the full report →](https://shivachintaluru-prog.github.io/stt-wer-eval/)**
 
